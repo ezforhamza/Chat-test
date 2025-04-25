@@ -3,9 +3,11 @@ import React, { useState } from "react";
 import { ChatProvider } from "./context/ChatContext";
 import { ChatTester } from "./components/ChatTester";
 import { DualChatTester } from "./components/DualChatTester";
+import ConversationViewer from "./components/ConversationViewer";
+import "./styles/conversations.css";
 
 function App() {
-  const [showDualChat, setShowDualChat] = useState(true); // Set to true by default to show dual chat
+  const [activeComponent, setActiveComponent] = useState("conversations"); // Default to conversations view
 
   return (
     <div className="App">
@@ -19,29 +21,43 @@ function App() {
           }}
         >
           <button
-            onClick={() => setShowDualChat(false)}
+            onClick={() => setActiveComponent("conversations")}
             style={{
               padding: "8px 16px",
-              backgroundColor: !showDualChat ? "#28a745" : "#6c757d",
+              backgroundColor: activeComponent === "conversations" ? "#28a745" : "#6c757d",
               color: "white",
               border: "none",
               borderRadius: "4px",
               cursor: "pointer",
-              fontWeight: !showDualChat ? "bold" : "normal",
+              fontWeight: activeComponent === "conversations" ? "bold" : "normal",
+            }}
+          >
+            Past Conversations
+          </button>
+          <button
+            onClick={() => setActiveComponent("single")}
+            style={{
+              padding: "8px 16px",
+              backgroundColor: activeComponent === "single" ? "#28a745" : "#6c757d",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontWeight: activeComponent === "single" ? "bold" : "normal",
             }}
           >
             Single Chat Tester
           </button>
           <button
-            onClick={() => setShowDualChat(true)}
+            onClick={() => setActiveComponent("dual")}
             style={{
               padding: "8px 16px",
-              backgroundColor: showDualChat ? "#28a745" : "#6c757d",
+              backgroundColor: activeComponent === "dual" ? "#28a745" : "#6c757d",
               color: "white",
               border: "none",
               borderRadius: "4px",
               cursor: "pointer",
-              fontWeight: showDualChat ? "bold" : "normal",
+              fontWeight: activeComponent === "dual" ? "bold" : "normal",
             }}
           >
             Dual Chat Tester
@@ -50,7 +66,9 @@ function App() {
       </div>
 
       <ChatProvider>
-        {showDualChat ? <DualChatTester /> : <ChatTester />}
+        {activeComponent === "conversations" && <ConversationViewer />}
+        {activeComponent === "single" && <ChatTester />}
+        {activeComponent === "dual" && <DualChatTester />}
       </ChatProvider>
     </div>
   );

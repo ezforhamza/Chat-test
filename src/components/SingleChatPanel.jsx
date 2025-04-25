@@ -279,48 +279,76 @@ export const SingleChatPanel = ({ userId, otherUserId, panelTitle }) => {
     setSelectedFile(file);
   };
 
-  // Handle file upload
-  const handleSendWithAttachment = async (e) => {
-    if (e) e.preventDefault();
-    if (!selectedFile || !conversation) return;
+ // Replace the handleSendWithAttachment function in your SingleChatPanel.jsx
 
-    try {
-      setUploading(true);
-      setError(null);
+const handleSendWithAttachment = async (e) => {
+  if (e) e.preventDefault();
+  if (!selectedFile || !conversation) return;
 
-      const messageType = selectedFile.type.startsWith("image/")
-        ? "image"
-        : "file";
-      const caption = messageInputRef.current?.value?.trim() || null;
+  try {
+    setUploading(true);
+    setError(null);
 
-      console.log(
-        `[${panelTitle}] Sending ${messageType} attachment to conversation ${conversation}`
-      );
+    const messageType = selectedFile.type.startsWith("image/")
+      ? "image"
+      : "file";
+    const caption = messageInputRef.current?.value?.trim() || null;
 
-      const result = await chatService.sendMessageWithAttachment(
-        conversation,
-        userId,
-        selectedFile,
-        messageType,
-        replyToMessage ? replyToMessage.message_id : null
-      );
+    console.log(
+      `[${panelTitle}] Starting attachment upload process for:`,
+      {
+        name: selectedFile.name,
+        type: selectedFile.type,
+        size: selectedFile.size,
+        lastModified: new Date(selectedFile.lastModified).toISOString()
+      }
+    );
 
-      console.log(`[${panelTitle}] Attachment sent successfully:`, result);
+    console.log(`[${panelTitle}] Environment:`, {
+      isCodeSandbox: window.location.hostname.includes('codesandbox.io'),
+      hostname: window.location.hostname,
+      protocol: window.location.protocol
+    });
 
-      // Clear the selected file and input
-      setSelectedFile(null);
-      setReplyToMessage(null);
-      if (messageInputRef.current) messageInputRef.current.value = "";
+    // Try using the chatService.sendMessageWithAttachment function
+    console.log(`[${panelTitle}] Sending message with attachment...`);
+    const result = await chatService.sendMessageWithAttachment(
+      conversation,
+      userId,
+      selectedFile,
+      messageType,
+      replyToMessage ? replyToMessage.message_id : null
+    );
 
-      // Reload messages to show the new message with attachment
-      await loadMessages(conversation);
-    } catch (err) {
-      console.error(`[${panelTitle}] Error sending attachment:`, err);
-      setError(err.message || "Failed to send attachment");
-    } finally {
-      setUploading(false);
+    console.log(`[${panelTitle}] Send result:`, result);
+
+    // Clear the selected file and input
+    setSelectedFile(null);
+    setReplyToMessage(null);
+    if (messageInputRef.current) messageInputRef.current.value = "";
+
+    // Reload messages to show the new message with attachment
+    await loadMessages(conversation);
+  } catch (err) {
+    console.error(`[${panelTitle}] Error sending attachment:`, err);
+    setError(err.message || "Failed to send attachment");
+    
+    // Try to update the placeholder message to indicate failure
+    if (err.messageId) {
+      try {
+        await chatService.editMessage(
+          err.messageId,
+          userId,
+          "Failed to send attachment: " + (err.message || "Unknown error")
+        );
+      } catch (editError) {
+        console.error(`[${panelTitle}] Error updating failed message:`, editError);
+      }
     }
-  };
+  } finally {
+    setUploading(false);
+  }
+};
 
   // Handle cancellation of file upload
   const handleCancelUpload = () => {

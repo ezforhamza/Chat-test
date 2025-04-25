@@ -5,31 +5,38 @@ import { messageService } from "./messageService";
 // The bucket name for all chat attachments
 const ATTACHMENT_BUCKET = "chat-media-and-attachments";
 
+// Detect if we're running in CodeSandbox
+const isCodeSandbox = () => {
+  return window.location.hostname.includes('codesandbox.io');
+};
+
 const attachmentServiceImpl = {
   // Send a file attachment
   async uploadAttachment(file, messageId, conversationId, senderId) {
     try {
-      // For testing without edge functions
-      if (process.env.NODE_ENV === "development") {
-        return await this.mockUploadAttachment(
-          file,
-          messageId,
-          conversationId,
-          senderId
-        );
-      }
-
-      // Production code - use Edge Function
+      // Sanitize the file name to remove problematic characters
+      const sanitizedFileName = this.sanitizeFileName(file.name);
+      
       // Convert file to base64
       const base64File = await this.fileToBase64(file);
 
+      console.log(`Uploading attachment: ${sanitizedFileName}`);
+      
+      // If running in CodeSandbox, use mock implementation
+      if (isCodeSandbox()) {
+        console.log("Running in CodeSandbox environment - using mock upload");
+        return await this.mockUploadForCodeSandbox(file, messageId, sanitizedFileName);
+      }
+      
+      console.log(`Calling Edge Function to process attachment...`);
+      
       // Call the Supabase Edge Function
       const { data, error } = await baseService.supabase.functions.invoke(
         "process-chat-attachment",
         {
           body: JSON.stringify({
             fileData: base64File,
-            fileName: file.name,
+            fileName: sanitizedFileName,
             fileType: file.type,
             messageId,
             conversationId,
@@ -39,130 +46,61 @@ const attachmentServiceImpl = {
         }
       );
 
-      if (error) throw error;
+      if (error) {
+        console.error("Edge Function error:", error);
+        throw error;
+      }
+      
+      console.log("Edge Function response:", data);
       return data;
     } catch (error) {
       console.error("Error uploading attachment:", error);
-
-      // Fallback to direct upload if Edge Function fails
-      return await this.directUploadAttachment(
-        file,
-        messageId,
-        conversationId,
-        senderId
-      );
-    }
-  },
-
-  // Direct upload to Supabase storage (backup method)
-  async directUploadAttachment(file, messageId, conversationId, senderId) {
-    try {
-      console.log("Falling back to direct upload");
-
-      // Generate a unique file path
-      const timestamp = new Date().getTime();
-      const filePath = `${senderId}/${conversationId}/${timestamp}_${file.name}`;
-
-      // Upload the file to storage
-      const { data: uploadData, error: uploadError } =
-        await baseService.supabase.storage
-          .from(ATTACHMENT_BUCKET)
-          .upload(filePath, file, {
-            cacheControl: "3600",
-            upsert: false,
-          });
-
-      if (uploadError) throw uploadError;
-
-      // Get the public URL
-      const {
-        data: { publicUrl },
-      } = baseService.supabase.storage
-        .from(ATTACHMENT_BUCKET)
-        .getPublicUrl(filePath);
-
-      // Create a thumbnail URL for images
-      let thumbnailUrl = null;
-      if (file.type.startsWith("image/") && file.type !== "image/gif") {
-        thumbnailUrl = publicUrl;
+      
+      // If we're in CodeSandbox and the edge function failed, fall back to mock
+      if (isCodeSandbox()) {
+        console.log("Falling back to mock implementation for CodeSandbox");
+        return await this.mockUploadForCodeSandbox(file, messageId, this.sanitizeFileName(file.name));
       }
-
-      // Create the attachment record
-      const { data: attachment, error: attachmentError } =
-        await baseService.supabase
-          .from("chat_attachments")
-          .insert({
-            message_id: messageId,
-            file_url: publicUrl,
-            file_type: file.type,
-            file_name: file.name,
-            file_size: file.size,
-            thumbnail_url: thumbnailUrl,
-          })
-          .select()
-          .single();
-
-      if (attachmentError) throw attachmentError;
-
-      return {
-        success: true,
-        attachment,
-      };
-    } catch (error) {
-      console.error("Error in direct upload:", error);
-
-      // Last resort - use mock attachment for testing
-      return await this.mockUploadAttachment(
-        file,
-        messageId,
-        conversationId,
-        senderId
-      );
-    }
-  },
-
-  // Mock attachment upload for testing without Edge Functions
-  async mockUploadAttachment(file, messageId, conversationId, senderId) {
-    try {
-      console.log("MOCK: Uploading attachment for testing");
-
-      // Generate fake URLs for testing
-      const fileUrl = URL.createObjectURL(file);
-
-      // Create a fake attachment record
-      const mockAttachment = {
-        id: `mock-${Date.now()}`,
-        message_id: messageId,
-        file_url: fileUrl,
-        file_type: file.type,
-        file_name: file.name,
-        file_size: file.size,
-        thumbnail_url: file.type.startsWith("image/") ? fileUrl : null,
-        created_at: new Date().toISOString(),
-      };
-
-      // Store in local mock database (using localStorage)
-      this.storeLocalAttachment(mockAttachment);
-
-      // Simulate network delay to test UI
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      return {
-        success: true,
-        attachment: mockAttachment,
-      };
-    } catch (error) {
-      console.error("Error in mock uploadAttachment:", error);
+      
       throw error;
     }
   },
 
-  // Store attachment in localStorage (for testing)
-  storeLocalAttachment(attachment) {
+  // Mock implementation specifically for CodeSandbox
+  async mockUploadForCodeSandbox(file, messageId, sanitizedFileName) {
+    console.log("Using mock upload for CodeSandbox");
+    
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Create a blob URL for the file
+    const blobUrl = URL.createObjectURL(file);
+    
+    // Create a mock attachment object
+    const mockAttachment = {
+      id: `mock-${Date.now()}`,
+      message_id: messageId,
+      file_url: blobUrl,
+      file_type: file.type,
+      file_name: sanitizedFileName,
+      file_size: file.size,
+      thumbnail_url: file.type.startsWith('image/') ? blobUrl : null,
+      created_at: new Date().toISOString()
+    };
+    
+    // Store mock attachment in localStorage for persistence
+    this.storeMockAttachment(mockAttachment);
+    
+    return {
+      success: true,
+      attachment: mockAttachment
+    };
+  },
+  
+  // Store mock attachment in localStorage
+  storeMockAttachment(attachment) {
     try {
-      const attachments = JSON.parse(
-        localStorage.getItem("mockAttachments") || "{}"
-      );
+      const attachments = JSON.parse(localStorage.getItem("mockAttachments") || "{}");
       if (!attachments[attachment.message_id]) {
         attachments[attachment.message_id] = [];
       }
@@ -171,6 +109,15 @@ const attachmentServiceImpl = {
     } catch (error) {
       console.error("Error storing mock attachment:", error);
     }
+  },
+
+  // Sanitize file name to remove problematic characters
+  sanitizeFileName(fileName) {
+    // Replace brackets, special characters and spaces with underscores
+    return fileName
+      .replace(/[\[\](){}]/g, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .replace(/\s+/g, '_');
   },
 
   // Send a message with attachment
@@ -187,6 +134,8 @@ const attachmentServiceImpl = {
         messageType = file.type.startsWith("image/") ? "image" : "file";
       }
 
+      console.log(`Sending ${messageType} attachment: ${file.name}`);
+
       // First send a placeholder message
       const messageId = await messageService.sendMessage(
         conversationId,
@@ -198,6 +147,8 @@ const attachmentServiceImpl = {
 
       if (!messageId) throw new Error("Failed to create message");
 
+      console.log(`Created message with ID: ${messageId}, now uploading attachment...`);
+
       // Then upload the attachment
       const result = await this.uploadAttachment(
         file,
@@ -207,8 +158,11 @@ const attachmentServiceImpl = {
       );
 
       if (!result.success) {
+        console.error("Upload failed:", result.error || "Unknown error");
         throw new Error(result.error || "Failed to upload attachment");
       }
+
+      console.log("Attachment uploaded successfully:", result.attachment);
 
       // Return the result containing the attachment info
       return {
@@ -273,23 +227,22 @@ const attachmentServiceImpl = {
   // Get attachments for a message
   async getMessageAttachments(messageId) {
     try {
-      // Check for mock attachments first (for testing)
-      try {
-        const mockAttachments = JSON.parse(
-          localStorage.getItem("mockAttachments") || "{}"
-        );
-        if (
-          mockAttachments[messageId] &&
-          mockAttachments[messageId].length > 0
-        ) {
-          console.log("Using mock attachments for message", messageId);
-          return mockAttachments[messageId];
+      // Check for mock attachments first (for CodeSandbox)
+      if (isCodeSandbox()) {
+        try {
+          const mockAttachments = JSON.parse(
+            localStorage.getItem("mockAttachments") || "{}"
+          );
+          if (mockAttachments[messageId] && mockAttachments[messageId].length > 0) {
+            console.log("Using mock attachments for message", messageId);
+            return mockAttachments[messageId];
+          }
+        } catch (e) {
+          console.log("No mock attachments found");
         }
-      } catch (e) {
-        console.log("No mock attachments found");
       }
 
-      // Otherwise get from database
+      // Get from database
       const { data, error } = await baseService.supabase
         .from("chat_attachments")
         .select("*")
@@ -336,7 +289,7 @@ const attachmentServiceImpl = {
       reader.onload = () => resolve(reader.result);
       reader.onerror = (error) => reject(error);
     });
-  },
+  }
 };
 
 // Export the object with proper binding
@@ -344,13 +297,13 @@ export const attachmentService = {
   uploadAttachment: attachmentServiceImpl.uploadAttachment.bind(
     attachmentServiceImpl
   ),
-  directUploadAttachment: attachmentServiceImpl.directUploadAttachment.bind(
+  mockUploadForCodeSandbox: attachmentServiceImpl.mockUploadForCodeSandbox.bind(
     attachmentServiceImpl
   ),
-  mockUploadAttachment: attachmentServiceImpl.mockUploadAttachment.bind(
+  storeMockAttachment: attachmentServiceImpl.storeMockAttachment.bind(
     attachmentServiceImpl
   ),
-  storeLocalAttachment: attachmentServiceImpl.storeLocalAttachment.bind(
+  sanitizeFileName: attachmentServiceImpl.sanitizeFileName.bind(
     attachmentServiceImpl
   ),
   sendMessageWithAttachment:
